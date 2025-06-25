@@ -1,0 +1,28 @@
+server:
+  port: 8080
+  host: "0.0.0.0"
+  
+database:
+  type: "sqlite"
+  path: "./terminal.db"
+  
+blockchain:
+  network_url: "http://localhost:8545"
+  contract_address: "0x345cA3e014Aaf5dcA488057592ee47305D9B3e10"
+  private_key: ""
+  
+biometric:
+  fingerprint_device: "/dev/ttyUSB0"
+  quality_threshold: 0.8
+  match_threshold: 0.85
+  
+hardware:
+  display_device: "/dev/fb0"
+  printer_device: "/dev/ttyUSB1"
+  
+encryption:
+  key: "your-32-byte-encryption-key-here!!"
+  
+logging:
+  level: "info"
+  file: "./logs/terminal.log"

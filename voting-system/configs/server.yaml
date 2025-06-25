@@ -1,0 +1,25 @@
+server:
+  port: 8081
+  host: "0.0.0.0"
+  
+database:
+  type: "postgres"
+  host: "localhost"
+  port: 5432
+  user: "voting_user"
+  password: "voting_password"
+  dbname: "voting_system"
+  
+blockchain:
+  network_url: "http://localhost:8545"
+  contract_address: "0x345cA3e014Aaf5dcA488057592ee47305D9B3e10"
+  private_key: ""
+  
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  
+logging:
+  level: "info"
+  file: "./logs/server.log"
