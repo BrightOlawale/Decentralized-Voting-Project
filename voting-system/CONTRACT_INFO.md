@@ -4,7 +4,7 @@
 - **Contract Name**: SecureVotingSystem
 - **Contract Address**: `0x345cA3e014Aaf5dcA488057592ee47305D9B3e10`
 - **Network**: Development (Ganache)
-- **Generated**: Mon Jun 23 14:37:26 WAT 2025
+- **Generated**: Tue Aug  5 11:21:41 WAT 2025
 
 ## Files Generated
 - `internal/blockchain/contracts.go` - Main contract bindings

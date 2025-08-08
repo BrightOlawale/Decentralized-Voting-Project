@@ -18,7 +18,7 @@ const (
 	// Test configuration
 	testNodeURL      = "http://localhost:8545"
 	testPrivateKey   = "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318"
-	testContractAddr = "" // Will be set from environment or deployment
+	testContractAddr = "0x345cA3e014Aaf5dcA488057592ee47305D9B3e10" // Will be set from environment or deployment
 )
 
 // TestBlockchainClient tests the blockchain client functionality
@@ -30,6 +30,9 @@ func TestBlockchainClient(t *testing.T) {
 
 	// Get contract address from environment
 	contractAddr := os.Getenv("CONTRACT_ADDRESS")
+	if contractAddr == "" {
+		contractAddr = testContractAddr
+	}
 	if contractAddr == "" {
 		t.Skip("CONTRACT_ADDRESS not set, skipping integration tests")
 	}
@@ -271,6 +274,9 @@ func TestSyncManager(t *testing.T) {
 
 	contractAddr := os.Getenv("CONTRACT_ADDRESS")
 	if contractAddr == "" {
+		contractAddr = testContractAddr
+	}
+	if contractAddr == "" {
 		t.Skip("CONTRACT_ADDRESS not set, skipping sync manager tests")
 	}
 
@@ -357,6 +363,9 @@ func TestEventMonitor(t *testing.T) {
 
 	contractAddr := os.Getenv("CONTRACT_ADDRESS")
 	if contractAddr == "" {
+		contractAddr = testContractAddr
+	}
+	if contractAddr == "" {
 		t.Skip("CONTRACT_ADDRESS not set, skipping event monitor tests")
 	}
 
@@ -398,6 +407,9 @@ func TestConnectionManager(t *testing.T) {
 	}
 
 	contractAddr := os.Getenv("CONTRACT_ADDRESS")
+	if contractAddr == "" {
+		contractAddr = testContractAddr
+	}
 	if contractAddr == "" {
 		t.Skip("CONTRACT_ADDRESS not set, skipping connection manager tests")
 	}
@@ -471,6 +483,9 @@ func BenchmarkBlockchainOperations(b *testing.B) {
 	}
 
 	contractAddr := os.Getenv("CONTRACT_ADDRESS")
+	if contractAddr == "" {
+		contractAddr = testContractAddr
+	}
 	if contractAddr == "" {
 		b.Skip("CONTRACT_ADDRESS not set, skipping benchmarks")
 	}
@@ -576,6 +591,9 @@ func TestCompleteWorkflow(t *testing.T) {
 	}
 
 	contractAddr := os.Getenv("CONTRACT_ADDRESS")
+	if contractAddr == "" {
+		contractAddr = testContractAddr
+	}
 	if contractAddr == "" {
 		t.Skip("CONTRACT_ADDRESS not set, skipping integration test")
 	}

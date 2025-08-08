@@ -5,8 +5,14 @@ go 1.23.3
 require (
 	github.com/ethereum/go-ethereum v1.15.11
 	github.com/gin-gonic/gin v1.10.1
+	github.com/gorilla/websocket v1.4.2
+	github.com/joho/godotenv v1.5.1
+	github.com/lib/pq v1.10.9
+	github.com/mattn/go-sqlite3 v1.14.28
+	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.10.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
@@ -35,8 +41,8 @@ require (
 	github.com/go-playground/validator/v10 v10.20.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/goccy/go-json v0.10.4 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
