@@ -1,8 +1,8 @@
 const Web3 = require("web3");
 
 // Configuration
-const CONTRACT_ADDRESS = "0x345cA3e014Aaf5dcA488057592ee47305D9B3e10";
-const TEST_TERMINAL_ADDRESS = "0x2c7536E3605D9C16a7a3D7b1898e529396a65c23";
+const CONTRACT_ADDRESS = "0xF5B429316e06787683C7f4020533e3D434dad5fb";
+const TEST_TERMINAL_ADDRESS = "0xfaaa2d810fEE50582f04b6A741fC0D5389573654";
 const OWNER_ADDRESS = "0x627306090abab3a6e1400e9345bc60c78a8bef57"; // First Ganache account
 
 // Connect to local blockchain
@@ -115,5 +115,7 @@ async function authorizeTerminal() {
   }
 }
 
-// Run the authorization
-authorizeTerminal();
+module.exports = async function (callback) {
+  await authorizeTerminal();
+  callback();
+};

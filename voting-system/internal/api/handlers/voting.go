@@ -310,22 +310,22 @@ func CastVote(services interfaces.Services) gin.HandlerFunc {
 			CandidateID:      req.CandidateID,
 		}
 
-		// Get current election from database
-		currentElection, err := services.ElectionRepository().GetActiveElection()
-		if err != nil {
-			services.GetLogger().Error("Error getting current election from database: %v", err)
-			c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-				Error:   "election_error",
-				Code:    500,
-				Message: "Failed to get current election from database",
-			})
-			return
-		}
+		// // Get current election from database
+		// currentElection, err := services.ElectionRepository().GetActiveElection()
+		// if err != nil {
+		// 	services.GetLogger().Error("Error getting current election from database: %v", err)
+		// 	c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+		// 		Error:   "election_error",
+		// 		Code:    500,
+		// 		Message: "Failed to get current election from database",
+		// 	})
+		// 	return
+		// }
 
 		// Store vote in database
 		dbVote := &database.Vote{
 			VerificationHash: verificationHash,
-			ElectionID:       currentElection.ID,
+			ElectionID:       currentElectionID.Int64(),
 			PollingUnitID:    req.PollingUnitID,
 			CandidateID:      req.CandidateID,
 			EncryptedVote:    req.EncryptedVote,

@@ -356,3 +356,31 @@ func WebAdminPanel(services interfaces.Services) gin.HandlerFunc {
 		})
 	}
 }
+
+// WebLoginPage renders a simple login form
+func WebLoginPage(services interfaces.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.HTML(http.StatusOK, "login.html", gin.H{
+			"title": "Login",
+		})
+	}
+}
+
+// WebLoginSubmit accepts username/password and sets a session cookie
+func WebLoginSubmit(services interfaces.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		type creds struct {
+			Username string `json:"username" form:"username"`
+			Password string `json:"password" form:"password"`
+		}
+		var in creds
+		if err := c.ShouldBind(&in); err != nil || in.Username == "" || in.Password == "" {
+			c.HTML(http.StatusBadRequest, "login.html", gin.H{"title": "Login", "error": "Invalid credentials"})
+			return
+		}
+		// TODO: real authentication; for now accept any non-empty
+		// Set a simple session cookie (placeholder)
+		c.SetCookie("session_id", "dev-session", 3600, "/", "", false, true)
+		c.Redirect(http.StatusSeeOther, "/web/")
+	}
+}

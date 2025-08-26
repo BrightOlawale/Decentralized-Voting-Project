@@ -7,6 +7,7 @@ import (
 	"time"
 	"voting-system/internal/api/interfaces"
 	"voting-system/internal/api/types"
+	"voting-system/internal/database"
 
 	"github.com/gin-gonic/gin"
 )
@@ -129,7 +130,26 @@ func GetElectionResults(services interfaces.Services) gin.HandlerFunc {
 			return
 		}
 
-		// Get election from database
+		// Prefer on-chain results if connected
+		if services.GetConnManager().IsConnected() {
+			bcID := new(big.Int).SetInt64(id)
+			// Aggregate per-candidate counts from chain
+			agg, err := services.GetBlockchainClient().GetCandidateResults(bcID)
+			if err == nil {
+				resp := map[string]interface{}{
+					"election_id": id,
+					"results":     map[string]string{},
+				}
+				for k, v := range agg {
+					resp["results"].(map[string]string)[k] = v.String()
+				}
+				c.JSON(http.StatusOK, types.SuccessResponse{Success: true, Data: resp, Message: "Election results retrieved successfully"})
+				return
+			}
+			services.GetLogger().Warning("Blockchain results unavailable, falling back to DB: %v", err)
+		}
+
+		// Fallback to database cache
 		election, err := services.ElectionRepository().GetElectionByID(id)
 		if err != nil {
 			services.GetLogger().Error("Error getting election: %v", err)
@@ -141,7 +161,6 @@ func GetElectionResults(services interfaces.Services) gin.HandlerFunc {
 			return
 		}
 
-		// Get election results from database
 		results, err := services.VoteRepository().GetElectionResults(id)
 		if err != nil {
 			services.GetLogger().Error("Error getting election results: %v", err)
@@ -153,7 +172,6 @@ func GetElectionResults(services interfaces.Services) gin.HandlerFunc {
 			return
 		}
 
-		// Add election metadata to results
 		results["election"] = map[string]interface{}{
 			"id":          election.ID,
 			"name":        election.Name,
@@ -168,6 +186,48 @@ func GetElectionResults(services interfaces.Services) gin.HandlerFunc {
 			Data:    results,
 			Message: "Election results retrieved successfully",
 		})
+	}
+}
+
+// GetElectionCandidates returns candidate IDs for a given election (public)
+func GetElectionCandidates(services interfaces.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		electionIDStr := c.Param("id")
+		if electionIDStr == "" {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "missing_parameter", Code: 400, Message: "Election ID is required"})
+			return
+		}
+
+		// Try DB cache first by blockchain_id -> local id -> candidates list
+		if e, err := services.ElectionRepository().GetElectionByBlockchainID(electionIDStr); err == nil && e != nil {
+			if list, err2 := services.CandidateRepository().ListByElection(e.ID); err2 == nil && len(list) > 0 {
+				cands := make([]string, 0, len(list))
+				for _, x := range list {
+					cands = append(cands, x.CandidateID)
+				}
+				c.JSON(http.StatusOK, types.SuccessResponse{Success: true, Data: map[string]interface{}{
+					"election_id": electionIDStr,
+					"candidates":  cands,
+				}})
+				return
+			}
+		}
+
+		// Fallback to blockchain details
+		bid, ok := new(big.Int).SetString(electionIDStr, 10)
+		if !ok {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "invalid_election_id", Code: 400, Message: "Invalid election ID format"})
+			return
+		}
+		details, err := services.GetBlockchainClient().GetElectionDetails(bid)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "blockchain_error", Code: 500, Message: "Failed to fetch election"})
+			return
+		}
+		c.JSON(http.StatusOK, types.SuccessResponse{Success: true, Data: map[string]interface{}{
+			"election_id": electionIDStr,
+			"candidates":  details.Candidates,
+		}})
 	}
 }
 
@@ -227,10 +287,11 @@ func GetElectionStatistics(services interfaces.Services) gin.HandlerFunc {
 func CreateElection(services interfaces.Services) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Name       string   `json:"name" binding:"required"`
-			StartTime  int64    `json:"start_time" binding:"required"`
-			EndTime    int64    `json:"end_time" binding:"required"`
-			Candidates []string `json:"candidates" binding:"required,min=2"`
+			Name        string   `json:"name" binding:"required"`
+			StartTime   int64    `json:"start_time" binding:"required"`
+			EndTime     int64    `json:"end_time" binding:"required"`
+			Candidates  []string `json:"candidates" binding:"required,min=1"`
+			Description string   `json:"description"`
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -244,43 +305,62 @@ func CreateElection(services interfaces.Services) gin.HandlerFunc {
 
 		// Validate times
 		now := time.Now().Unix()
-		if req.StartTime <= now {
+		if req.StartTime <= now || req.EndTime <= req.StartTime {
 			c.JSON(http.StatusBadRequest, types.ErrorResponse{
-				Error:   "invalid_start_time",
+				Error:   "invalid_time_window",
 				Code:    400,
-				Message: "Start time must be in the future",
+				Message: "Start time must be future and end time after start",
 			})
 			return
 		}
 
-		if req.EndTime <= req.StartTime {
-			c.JSON(http.StatusBadRequest, types.ErrorResponse{
-				Error:   "invalid_end_time",
-				Code:    400,
-				Message: "End time must be after start time",
-			})
+		// Create on blockchain (owner account configured in blockchain client)
+		start := big.NewInt(req.StartTime)
+		end := big.NewInt(req.EndTime)
+		tx, err := services.GetBlockchainClient().CreateElection(req.Name, start, end, req.Candidates)
+		if err != nil {
+			services.GetLogger().Error("CreateElection on-chain failed: %v", err)
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "blockchain_error", Code: 400, Message: err.Error()})
+			return
+		}
+		receipt, err := services.GetBlockchainClient().WaitForTransaction(tx)
+		if err != nil {
+			services.GetLogger().Error("CreateElection tx failed: %v", err)
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "transaction_failed", Code: 400, Message: err.Error()})
 			return
 		}
 
-		// Create election on blockchain
-		// startTime := big.NewInt(req.StartTime)
-		// endTime := big.NewInt(req.EndTime)
+		// Infer new election ID by reading total elections
+		total, err := services.GetBlockchainClient().GetTotalElections()
+		if err != nil {
+			services.GetLogger().Warning("Could not fetch total elections: %v", err)
+		}
 
-		// This would require owner permissions - implement based on your admin setup
-		// For now, this is a placeholder showing the structure
+		// Cache election in DB
+		e := &database.Election{
+			BlockchainID: total.String(),
+			Name:         req.Name,
+			Description:  req.Description,
+			StartTime:    time.Unix(req.StartTime, 0),
+			EndTime:      time.Unix(req.EndTime, 0),
+			IsActive:     false,
+			CreatedAt:    time.Now(),
+		}
+		if err := services.ElectionRepository().CreateElection(e); err != nil {
+			services.GetLogger().Warning("Failed to cache election in DB: %v", err)
+		} else {
+			// Persist initial candidates in DB cache
+			for _, cid := range req.Candidates {
+				_ = services.CandidateRepository().Insert(e.ID, cid, "", "")
+			}
+		}
 
-		clientIP := getClientIP(c)
-		createAuditLog(services, "election_create_attempt", "admin", "",
-			"Election creation attempt: "+req.Name, clientIP)
-
-		c.JSON(http.StatusOK, types.SuccessResponse{
+		c.JSON(http.StatusCreated, types.SuccessResponse{
 			Success: true,
-			Message: "Election creation initiated",
+			Message: "Election created",
 			Data: map[string]interface{}{
-				"name":       req.Name,
-				"start_time": req.StartTime,
-				"end_time":   req.EndTime,
-				"candidates": req.Candidates,
+				"blockchain_id": total.String(),
+				"tx_hash":       receipt.TxHash.Hex(),
 			},
 		})
 	}
@@ -300,18 +380,30 @@ func StartElection(services interfaces.Services) gin.HandlerFunc {
 			return
 		}
 
-		clientIP := getClientIP(c)
-		createAuditLog(services, "election_start_attempt", "admin", "",
-			"Election start attempt: "+electionIDStr, clientIP)
+		tx, err := services.GetBlockchainClient().StartElection(electionID)
+		if err != nil {
+			services.GetLogger().Error("StartElection on-chain failed: %v", err)
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "blockchain_error", Code: 400, Message: err.Error()})
+			return
+		}
+		receipt, err := services.GetBlockchainClient().WaitForTransaction(tx)
+		if err != nil {
+			services.GetLogger().Error("StartElection tx failed: %v", err)
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "transaction_failed", Code: 400, Message: err.Error()})
+			return
+		}
 
-		// This would require owner permissions - implement based on your admin setup
-		services.GetLogger().Info("Election start requested - election_id: %s", electionID.String())
+		// Update DB cache if present
+		if e, err := services.ElectionRepository().GetElectionByBlockchainID(electionID.String()); err == nil {
+			_ = services.ElectionRepository().UpdateElectionStatus(e.ID, true)
+		}
 
 		c.JSON(http.StatusOK, types.SuccessResponse{
 			Success: true,
-			Message: "Election start initiated",
+			Message: "Election started",
 			Data: map[string]interface{}{
 				"election_id": electionID.String(),
+				"tx_hash":     receipt.TxHash.Hex(),
 			},
 		})
 	}
@@ -335,14 +427,109 @@ func EndElection(services interfaces.Services) gin.HandlerFunc {
 		createAuditLog(services, "election_end_attempt", "admin", "",
 			"Election end attempt: "+electionIDStr, clientIP)
 
-		// This would require owner permissions - implement based on your admin setup
-		services.GetLogger().Info("Election end requested - election_id: %s", electionID.String())
+		// End the current active election on-chain (owner permissions required)
+		tx, err := services.GetBlockchainClient().EndElection()
+		if err != nil {
+			services.GetLogger().Error("EndElection on-chain failed: %v", err)
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "blockchain_error", Code: 400, Message: err.Error()})
+			return
+		}
+		receipt, err := services.GetBlockchainClient().WaitForTransaction(tx)
+		if err != nil {
+			services.GetLogger().Error("EndElection tx failed: %v", err)
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "transaction_failed", Code: 400, Message: err.Error()})
+			return
+		}
+
+		// Update DB cache if present
+		if e, err := services.ElectionRepository().GetElectionByBlockchainID(electionID.String()); err == nil {
+			_ = services.ElectionRepository().UpdateElectionStatus(e.ID, false)
+		}
+
+		services.GetLogger().Info("Election ended - election_id: %s, tx: %s", electionID.String(), receipt.TxHash.Hex())
 
 		c.JSON(http.StatusOK, types.SuccessResponse{
 			Success: true,
-			Message: "Election end initiated",
+			Message: "Election ended",
 			Data: map[string]interface{}{
 				"election_id": electionID.String(),
+				"tx_hash":     receipt.TxHash.Hex(),
+			},
+		})
+	}
+}
+
+// RegisterCandidates registers one or more candidates for an election (Admin only)
+func RegisterCandidates(services interfaces.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		electionIDStr := c.Param("id")
+		electionID, ok := new(big.Int).SetString(electionIDStr, 10)
+		if !ok {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "invalid_election_id", Code: 400, Message: "Invalid election ID"})
+			return
+		}
+
+		var req struct {
+			Candidates []string `json:"candidates" binding:"required,min=1"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "invalid_request", Code: 400, Message: err.Error()})
+			return
+		}
+
+		if !services.GetConnManager().IsConnected() {
+			c.JSON(http.StatusServiceUnavailable, types.ErrorResponse{Error: "blockchain_offline", Code: 503, Message: "Blockchain is offline"})
+			return
+		}
+
+		var receiptHash string
+		var err error
+		if len(req.Candidates) == 1 {
+			tx, e := services.GetBlockchainClient().RegisterCandidate(electionID, req.Candidates[0])
+			if e != nil {
+				services.GetLogger().Error("RegisterCandidate failed: %v", e)
+				c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "blockchain_error", Code: 400, Message: e.Error()})
+				return
+			}
+			rec, e := services.GetBlockchainClient().WaitForTransaction(tx)
+			if e == nil {
+				receiptHash = rec.TxHash.Hex()
+			}
+			err = e
+		} else {
+			tx, e := services.GetBlockchainClient().RegisterCandidates(electionID, req.Candidates)
+			if e != nil {
+				services.GetLogger().Error("RegisterCandidates failed: %v", e)
+				c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "blockchain_error", Code: 400, Message: e.Error()})
+				return
+			}
+			rec, e := services.GetBlockchainClient().WaitForTransaction(tx)
+			if e == nil {
+				receiptHash = rec.TxHash.Hex()
+			}
+			err = e
+		}
+		if err != nil {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "transaction_failed", Code: 400, Message: err.Error()})
+			return
+		}
+
+		// Persist candidates to DB cache as well
+		// Resolve local election row by blockchain_id
+		elect, _ := services.ElectionRepository().GetElectionByBlockchainID(electionID.String())
+		if elect != nil {
+			for _, cid := range req.Candidates {
+				_ = services.CandidateRepository().Insert(elect.ID, cid, "", "")
+			}
+		}
+
+		c.JSON(http.StatusOK, types.SuccessResponse{
+			Success: true,
+			Message: "Candidates registered",
+			Data: map[string]interface{}{
+				"election_id": electionID.String(),
+				"tx_hash":     receiptHash,
+				"count":       len(req.Candidates),
 			},
 		})
 	}
@@ -354,4 +541,44 @@ func calculatePercentage(votes, total int64) float64 {
 		return 0
 	}
 	return float64(votes) / float64(total) * 100
+}
+
+// ListElections returns a paginated list of elections from DB cache
+func ListElections(services interfaces.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		limit := 50
+		offset := 0
+		if v := c.Query("limit"); v != "" {
+			fmt.Sscanf(v, "%d", &limit)
+		}
+		if v := c.Query("offset"); v != "" {
+			fmt.Sscanf(v, "%d", &offset)
+		}
+		list, err := services.ElectionRepository().ListElections(limit, offset)
+		if err != nil {
+			services.GetLogger().Error("ListElections err: %v", err)
+			c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "db_error", Code: 500, Message: "Failed to list elections"})
+			return
+		}
+		c.JSON(http.StatusOK, types.SuccessResponse{Success: true, Data: list})
+	}
+}
+
+// DeleteElection deletes an election and related entities from DB (does not touch chain)
+func DeleteElection(services interfaces.Services) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			ID int64 `json:"id"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.ID <= 0 {
+			c.JSON(http.StatusBadRequest, types.ErrorResponse{Error: "invalid_request", Code: 400, Message: "id required"})
+			return
+		}
+		if err := services.ElectionRepository().DeleteElectionCascade(req.ID); err != nil {
+			services.GetLogger().Error("DeleteElection err: %v", err)
+			c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "db_error", Code: 500, Message: "Failed to delete election"})
+			return
+		}
+		c.JSON(http.StatusOK, types.SuccessResponse{Success: true, Message: "Election deleted"})
+	}
 }

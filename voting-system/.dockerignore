@@ -1,0 +1,14 @@
+node_modules
+bin
+build
+logs
+*.log
+*.sqlite
+*.db
+coverage*
+.DS_Store
+.git
+.gitignore
+.tmp
+**/*.test.*
+contracts/build 

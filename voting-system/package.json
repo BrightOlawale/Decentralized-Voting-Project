@@ -16,5 +16,10 @@
   "dependencies": {
     "@openzeppelin/contracts": "^4.9.6",
     "truffle": "^5.11.5"
+  },
+  "devDependencies": {
+    "@truffle/hdwallet-provider": "^2.1.15",
+    "ethers": "^5.8.0",
+    "jsonwebtoken": "^9.0.2"
   }
 }

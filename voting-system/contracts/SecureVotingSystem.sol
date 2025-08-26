@@ -23,6 +23,7 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
         uint256 timestamp;             // When vote was cast
         string pollingUnitId;          // Where vote was cast
         uint256 electionId;            // Which election
+        string candidateId;            // Candidate chosen for this vote
         bool isValid;                  // Vote validity status
     }
     
@@ -87,6 +88,7 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
     event TerminalAuthorized(address indexed terminal, bool status);
     event PollingUnitRegistered(string indexed pollingUnitId, string name);
     event VoteInvalidated(uint256 indexed voteId, string reason);
+    event CandidateRegistered(uint256 indexed electionId, string indexed candidateId);
     
     // Modifiers
     modifier onlyAuthorizedTerminal() {
@@ -120,6 +122,13 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
         _;
     }
     
+    modifier onlyBeforeElection(uint256 _electionId) {
+        Election storage election = elections[_electionId];
+        require(!election.isActive, "VotingSystem: Election already active");
+        require(block.timestamp < election.startTime, "VotingSystem: Election already started");
+        _;
+    }
+    
     constructor() {
         // Initialize with deployer as first authorized terminal
         authorizedTerminals[msg.sender] = true;
@@ -143,7 +152,7 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
     ) external onlyOwner returns (uint256) {
         require(_startTime > block.timestamp, "VotingSystem: Start time must be in future");
         require(_endTime > _startTime, "VotingSystem: End time must be after start time");
-        require(_candidates.length > 0, "VotingSystem: Must have candidates");
+        // Candidates can be registered later; allow empty initial list
         
         _electionCounter.increment();
         uint256 electionId = _electionCounter.current();
@@ -167,6 +176,69 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
     }
     
     /**
+     * @dev Register a single candidate for a given election (before it starts)
+     * @param _electionId Election ID
+     * @param _candidateId Candidate ID
+     */
+    function registerCandidate(
+        uint256 _electionId,
+        string memory _candidateId
+    ) external onlyOwner onlyBeforeElection(_electionId) {
+        require(_electionId > 0 && _electionId <= _electionCounter.current(), "VotingSystem: Invalid election ID");
+        require(bytes(_candidateId).length > 0, "VotingSystem: Invalid candidate ID");
+
+        Election storage election = elections[_electionId];
+
+        bool exists = false;
+        for (uint i = 0; i < election.candidates.length; i++) {
+            if (keccak256(bytes(election.candidates[i])) == keccak256(bytes(_candidateId))) {
+                exists = true;
+                break;
+            }
+        }
+        require(!exists, "VotingSystem: Candidate already registered");
+
+        election.candidates.push(_candidateId);
+        election.candidateVotes[_candidateId] = 0;
+
+        emit CandidateRegistered(_electionId, _candidateId);
+    }
+    
+    /**
+     * @dev Register multiple candidates for a given election (before it starts)
+     * @param _electionId Election ID
+     * @param _candidateIds Array of candidate IDs
+     */
+    function registerCandidates(
+        uint256 _electionId,
+        string[] memory _candidateIds
+    ) external onlyOwner onlyBeforeElection(_electionId) {
+        require(_electionId > 0 && _electionId <= _electionCounter.current(), "VotingSystem: Invalid election ID");
+        require(_candidateIds.length > 0, "VotingSystem: No candidates provided");
+
+        Election storage election = elections[_electionId];
+
+        for (uint i = 0; i < _candidateIds.length; i++) {
+            string memory candidateId = _candidateIds[i];
+            require(bytes(candidateId).length > 0, "VotingSystem: Invalid candidate ID");
+
+            bool exists = false;
+            for (uint j = 0; j < election.candidates.length; j++) {
+                if (keccak256(bytes(election.candidates[j])) == keccak256(bytes(candidateId))) {
+                    exists = true;
+                    break;
+                }
+            }
+            require(!exists, "VotingSystem: Candidate already registered");
+
+            election.candidates.push(candidateId);
+            election.candidateVotes[candidateId] = 0;
+
+            emit CandidateRegistered(_electionId, candidateId);
+        }
+    }
+    
+    /**
      * @dev Start an election
      * @param _electionId Election ID to start
      */
@@ -178,6 +250,7 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
         require(!election.isActive, "VotingSystem: Election already started");
         require(block.timestamp >= election.startTime, "VotingSystem: Election start time not reached");
         require(block.timestamp < election.endTime, "VotingSystem: Election has expired");
+        require(election.candidates.length > 0, "VotingSystem: No candidates configured");
         
         election.isActive = true;
         currentElectionId = _electionId;
@@ -250,6 +323,7 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
             timestamp: block.timestamp,
             pollingUnitId: _pollingUnitId,
             electionId: currentElectionId,
+            candidateId: _candidateId,
             isValid: true
         });
         
@@ -403,6 +477,30 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
         external view returns (uint256) {
         return electionResults[_electionId][_candidateId];
     }
+
+    /**
+     * @dev Get all candidate IDs and their vote counts for an election
+     * @param _electionId Election ID
+     * @return candidateIds Array of candidate IDs
+     * @return voteCounts Array of vote counts corresponding to candidateIds
+     */
+    function getElectionCandidateResults(uint256 _electionId)
+        external
+        view
+        returns (string[] memory candidateIds, uint256[] memory voteCounts)
+    {
+        require(_electionId > 0 && _electionId <= _electionCounter.current(), "VotingSystem: Invalid election ID");
+        Election storage election = elections[_electionId];
+        uint256 len = election.candidates.length;
+        string[] memory ids = new string[](len);
+        uint256[] memory counts = new uint256[](len);
+        for (uint256 i = 0; i < len; i++) {
+            string memory cid = election.candidates[i];
+            ids[i] = cid;
+            counts[i] = electionResults[_electionId][cid];
+        }
+        return (ids, counts);
+    }
     
     /**
      * @dev Get current active election ID
@@ -450,7 +548,7 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
     }
     
     /**
-     * @dev Invalidate a specific vote
+     * @dev Invalidate a specific vote and adjust tallies
      * @param _voteId Vote ID to invalidate
      * @param _reason Reason for invalidation
      */
@@ -458,13 +556,27 @@ contract SecureVotingSystem is Ownable, ReentrancyGuard {
         require(_voteId > 0 && _voteId <= _voteCounter.current(), "VotingSystem: Invalid vote ID");
         require(votes[_voteId].isValid, "VotingSystem: Vote already invalid");
         
+        // Mark invalid
         votes[_voteId].isValid = false;
         
-        // Update election tallies if election is still active
+        // Load vote data for adjustments
         Vote memory vote = votes[_voteId];
-        if (elections[vote.electionId].isActive) {
-            elections[vote.electionId].totalVotes--;
+        Election storage election = elections[vote.electionId];
+        
+        // Decrement global/election tallies safely (if non-zero)
+        if (election.totalVotes > 0) {
+            election.totalVotes--;
+        }
+        if (pollingUnits[vote.pollingUnitId].votesRecorded > 0) {
             pollingUnits[vote.pollingUnitId].votesRecorded--;
+        }
+        
+        // Decrement candidate tallies (both views) safely
+        if (election.candidateVotes[vote.candidateId] > 0) {
+            election.candidateVotes[vote.candidateId]--;
+        }
+        if (electionResults[vote.electionId][vote.candidateId] > 0) {
+            electionResults[vote.electionId][vote.candidateId]--;
         }
         
         emit VoteInvalidated(_voteId, _reason);

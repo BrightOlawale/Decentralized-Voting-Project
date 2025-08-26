@@ -19,4 +19,5 @@ type Services interface {
 	AuditLogRepository() *repositories.AuditLogRepository
 	TerminalRepository() *repositories.TerminalRepository
 	UserRepository() *repositories.UserRepository
+	CandidateRepository() *repositories.CandidateRepository
 }

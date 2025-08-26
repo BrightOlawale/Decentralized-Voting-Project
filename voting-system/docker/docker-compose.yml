@@ -1,0 +1,29 @@
+version: "3.9"
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: blockchain-voting-system-api:latest
+    container_name: blockchain-voting-system-api
+    env_file:
+      - ../.env
+    environment:
+      - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
+      - SERVER_PORT=${SERVER_PORT:-8080}
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DB_PATH=${DB_PATH:-/app/voting.db}
+      - NETWORK_URL=${NETWORK_URL}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS}
+      - PRIVATE_KEY=${PRIVATE_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - LOG_FILE=${LOG_FILE:-/app/logs/server.log}
+    ports:
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
+    volumes:
+      - ../logs:/app/logs
+      - ../voting.db:/app/voting.db
+    restart: unless-stopped

@@ -45,12 +45,19 @@ type Services struct {
 	authService interfaces.AuthServiceInterface
 
 	// Repositories
-	voterRepository    *repositories.VoterRepository
-	electionRepository *repositories.ElectionRepository
-	voteRepository     *repositories.VoteRepository
-	auditLogRepository *repositories.AuditLogRepository
-	terminalRepository *repositories.TerminalRepository
-	userRepository     *repositories.UserRepository
+	// NOTE: Add candidateRepository to support candidate caching operations
+	candidateRepository *repositories.CandidateRepository
+	voterRepository     *repositories.VoterRepository
+	electionRepository  *repositories.ElectionRepository
+	voteRepository      *repositories.VoteRepository
+	auditLogRepository  *repositories.AuditLogRepository
+	terminalRepository  *repositories.TerminalRepository
+	userRepository      *repositories.UserRepository
+}
+
+// CandidateRepository returns the candidate repository instance
+func (s *Services) CandidateRepository() *repositories.CandidateRepository {
+	return s.candidateRepository
 }
 
 // CacheInterface defines caching operations
@@ -122,6 +129,7 @@ func NewServices(
 	services.authService = services
 
 	// Initialize repositories
+	services.candidateRepository = repositories.NewCandidateRepository(db)
 	services.voterRepository = repositories.NewVoterRepository(db)
 	services.electionRepository = repositories.NewElectionRepository(db)
 	services.voteRepository = repositories.NewVoteRepository(db)
@@ -349,6 +357,11 @@ func (s *Services) TerminalRepository() *repositories.TerminalRepository {
 
 func (s *Services) UserRepository() *repositories.UserRepository {
 	return s.userRepository
+}
+
+// GetConfig returns the loaded configuration
+func (s *Services) GetConfig() *config.Config {
+	return s.Config
 }
 
 // IsHealthy checks if all critical services are healthy

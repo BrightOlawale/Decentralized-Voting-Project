@@ -70,6 +70,16 @@ type Vote struct {
 	SyncedAt         *time.Time `db:"synced_at" json:"synced_at"`
 }
 
+// Candidate represents a candidate in an election (DB cache)
+type Candidate struct {
+	ID          int64     `db:"id" json:"id"`
+	ElectionID  int64     `db:"election_id" json:"election_id"`
+	CandidateID string    `db:"candidate_id" json:"candidate_id"`
+	Name        string    `db:"name" json:"name"`
+	Party       string    `db:"party" json:"party"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+}
+
 // PollingUnit represents a polling unit
 type PollingUnit struct {
 	ID                    string    `db:"id" json:"id"`

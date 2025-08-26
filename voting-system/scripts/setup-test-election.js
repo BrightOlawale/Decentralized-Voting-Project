@@ -1,8 +1,8 @@
 const Web3 = require("web3");
 
 // Configuration
-const CONTRACT_ADDRESS = "0x345cA3e014Aaf5dcA488057592ee47305D9B3e10";
-const OWNER_ADDRESS = "0x627306090abab3a6e1400e9345bc60c78a8bef57"; // First Ganache account
+const CONTRACT_ADDRESS = "0xF5B429316e06787683C7f4020533e3D434dad5fb";
+const OWNER_ADDRESS = "0xfaaa2d810fEE50582f04b6A741fC0D5389573654"; // First Ganache account
 
 // Connect to local blockchain
 const web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
@@ -22,7 +22,7 @@ const contractABI = [
         type: "uint256",
       },
       {
-        internalType: "uint256",
+        internalType: "uint256",  
         name: "_endTime",
         type: "uint256",
       },
@@ -262,5 +262,7 @@ async function setupTestElection() {
   }
 }
 
-// Run the setup
-setupTestElection();
+module.exports = async function (callback) {
+  await setupTestElection();
+  callback();
+};

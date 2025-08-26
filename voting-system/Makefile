@@ -288,3 +288,58 @@ help:
 
 # Default target
 .DEFAULT_GOAL := help
+
+# Docker
+.PHONY: docker-build docker-run docker-stop docker-logs
+
+docker-build:
+	@echo "🐳 Building API Docker image..."
+	docker build --no-cache -f docker/Dockerfile -t blockchain-voting-system-api:latest .
+
+# Run with Docker Compose using env from current shell or .env
+compose-up:
+	@echo "🐳 Starting services with Docker Compose (env passthrough)..."
+	cd docker && docker compose up --build -d
+
+compose-down:
+	@echo "🐳 Stopping Docker Compose services..."
+	cd docker && docker compose down
+
+compose-logs:
+	@echo "📜 Tailing API logs... (Ctrl+C to stop)"
+	@if docker ps -a --format "{{.Names}}" | grep -q "^blockchain-voting-system-api$$"; then \
+		docker logs -f blockchain-voting-system-api; \
+	else \
+		echo "❌ Container 'blockchain-voting-system-api' not found."; \
+		echo "💡 Run 'make compose-up' first to start the container."; \
+		exit 1; \
+	fi
+
+# Convenience: run with inline secrets
+compose-up-sepolia:
+	@echo "🐳 Starting services with Docker Compose (Sepolia example)..."
+	cd docker && \
+	SERVER_PORT=$${SERVER_PORT:-8080} \
+	DB_TYPE=sqlite \
+	DB_PATH=/app/voting.db \
+	NETWORK_URL=$${NETWORK_URL:?set NETWORK_URL} \
+	CONTRACT_ADDRESS=$${CONTRACT_ADDRESS:?set CONTRACT_ADDRESS} \
+	PRIVATE_KEY=$${PRIVATE_KEY:?set PRIVATE_KEY} \
+	JWT_SECRET=$${JWT_SECRET:?set JWT_SECRET} \
+	ENCRYPTION_KEY=$${ENCRYPTION_KEY:?set ENCRYPTION_KEY} \
+	docker compose up --build -d
+
+# Buildx multi-arch setup and push
+buildx-init:
+	@echo "🧰 Setting up docker buildx builder (if not exists)..."
+	@docker buildx ls | grep -q voting-builder || docker buildx create --name voting-builder --use
+	@docker buildx inspect --bootstrap
+
+buildx-push:
+	@echo "🚀 Building and pushing multi-arch image..."
+	@echo "    Tag: $${TAG:-oolawalebright/blockchain-voting-system:latest}"
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-f docker/Dockerfile \
+		-t $${TAG:-oolawalebright/blockchain-voting-system:latest} \
+		. --push

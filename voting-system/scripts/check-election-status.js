@@ -1,110 +1,52 @@
-const Web3 = require("web3");
+const SecureVotingSystem = artifacts.require("SecureVotingSystem");
 
-// Configuration
-const CONTRACT_ADDRESS = "0x345cA3e014Aaf5dcA488057592ee47305D9B3e10";
-
-// Connect to local blockchain
-const web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"));
-
-// Contract ABI (minimal for status functions)
-const contractABI = [
-  {
-    inputs: [],
-    name: "getCurrentElectionId",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "_electionId",
-        type: "uint256",
-      },
-    ],
-    name: "getElectionDetails",
-    outputs: [
-      {
-        internalType: "string",
-        name: "name",
-        type: "string",
-      },
-      {
-        internalType: "uint256",
-        name: "startTime",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "endTime",
-        type: "uint256",
-      },
-      {
-        internalType: "bool",
-        name: "isActive",
-        type: "bool",
-      },
-      {
-        internalType: "string[]",
-        name: "candidates",
-        type: "string[]",
-      },
-      {
-        internalType: "uint256",
-        name: "totalVotes",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-];
-
-async function checkElectionStatus() {
+module.exports = async function (callback) {
   try {
-    // Create contract instance
-    const contract = new web3.eth.Contract(contractABI, CONTRACT_ADDRESS);
+    const contract = await SecureVotingSystem.deployed();
 
-    // Check current election
-    console.log("Checking election status...");
-    const currentElectionId = await contract.methods
-      .getCurrentElectionId()
-      .call();
-    console.log(`Current election ID: ${currentElectionId}`);
+    const totalElections = (await contract.getTotalElections()).toNumber();
+    console.log("Total elections:", totalElections);
 
-    if (currentElectionId > 0) {
-      const electionDetails = await contract.methods
-        .getElectionDetails(currentElectionId)
-        .call();
-      console.log("Election details:");
-      console.log(`  Name: ${electionDetails.name}`);
-      console.log(
-        `  Start time: ${new Date(electionDetails.startTime * 1000)}`
-      );
-      console.log(`  End time: ${new Date(electionDetails.endTime * 1000)}`);
-      console.log(`  Is active: ${electionDetails.isActive}`);
-      console.log(`  Candidates: ${electionDetails.candidates.join(", ")}`);
-      console.log(`  Total votes: ${electionDetails.totalVotes}`);
+    const currentId = (await contract.getCurrentElectionId()).toNumber();
+    console.log("Current active election:", currentId);
 
-      if (electionDetails.isActive) {
-        console.log("✅ Election is active and ready for voting!");
-      } else {
-        console.log("⏳ Election is created but not yet active");
-      }
-    } else {
-      console.log("❌ No active election found");
+    if (totalElections === 0) {
+      console.log("No elections yet.");
+      return callback();
     }
-  } catch (error) {
-    console.error("Error checking election status:", error);
-  }
-}
 
-// Run the check
-checkElectionStatus();
+    // Show details for the latest election
+    const eid = totalElections;
+    const details = await contract.getElectionDetails(eid);
+    const name = details.name;
+    const start = details.startTime;
+    const end = details.endTime;
+    const isActive = details.isActive;
+    const candidates = details.candidates;
+    const totalVotes = details.totalVotes;
+    console.log({ eid, name, start, end, isActive, candidates, totalVotes });
+
+    // Candidate-wise totals (using the new view)
+    if (contract.getElectionCandidateResults) {
+      const res = await contract.getElectionCandidateResults(eid);
+      const ids = res.candidateIds || res[0];
+      const countsRaw = res.voteCounts || res[1];
+      const counts = countsRaw.map((x) => x.toString());
+      console.log("Candidate results:");
+      ids.forEach((id, i) => console.log(` - ${id}: ${counts[i]}`));
+    } else {
+      console.log(
+        "getElectionCandidateResults not available; falling back per candidate loop..."
+      );
+      for (const c of candidates) {
+        const n = (await contract.getElectionResults(eid, c)).toString();
+        console.log(` - ${c}: ${n}`);
+      }
+    }
+
+    callback();
+  } catch (err) {
+    console.error(err);
+    callback(err);
+  }
+};

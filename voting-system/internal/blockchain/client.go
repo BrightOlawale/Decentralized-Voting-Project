@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -46,6 +47,16 @@ type VoteInfo struct {
 	IsValid          bool
 }
 
+// PollingUnitData mirrors returned fields from contract pollingUnits mapping
+type PollingUnitData struct {
+	ID            string
+	Name          string
+	Location      string
+	TotalVoters   *big.Int
+	VotesRecorded *big.Int
+	IsActive      bool
+}
+
 // BlockchainClient handles all blockchain interactions
 type BlockchainClient struct {
 	client          *ethclient.Client
@@ -65,8 +76,8 @@ func NewBlockchainClient(nodeURL, contractAddress, privateKeyHex string) (*Block
 		return nil, fmt.Errorf("failed to connect to Ethereum node: %v", err)
 	}
 
-	// Get chain ID
-	chainID, err := client.NetworkID(context.Background())
+	// Get chain ID (use eth_chainId, not net_version)
+	chainID, err := client.ChainID(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chain ID: %v", err)
 	}
@@ -84,8 +95,8 @@ func NewBlockchainClient(nodeURL, contractAddress, privateKeyHex string) (*Block
 	}
 
 	// Set gas parameters
-	auth.GasLimit = uint64(3000000)         // 3M gas limit
-	auth.GasPrice = big.NewInt(20000000000) // 20 Gwei
+	auth.GasLimit = uint64(3000000) // 3M gas limit
+	// auth.GasPrice intentionally not set to allow dynamic fees (EIP-1559)
 
 	// Parse contract address
 	contractAddr := common.HexToAddress(contractAddress)
@@ -377,4 +388,124 @@ func (bc *BlockchainClient) UpdateGasPrice() error {
 
 	log.Printf("Updated gas price to: %s wei", bc.auth.GasPrice.String())
 	return nil
+}
+
+// AuthorizeTerminal authorizes or deauthorizes a terminal address (owner only)
+func (bc *BlockchainClient) AuthorizeTerminal(address string, status bool) (*types.Transaction, error) {
+	addr := common.HexToAddress(address)
+	tx, err := bc.contract.AuthorizeTerminal(bc.auth, addr, status)
+	if err != nil {
+		return nil, fmt.Errorf("failed to authorize terminal: %v", err)
+	}
+	return tx, nil
+}
+
+// CreateElection creates a new election (owner only). Returns the tx and, after it's mined, you can call GetTotalElections to infer the new ID.
+func (bc *BlockchainClient) CreateElection(name string, startTime, endTime *big.Int, candidates []string) (*types.Transaction, error) {
+	tx, err := bc.contract.CreateElection(bc.auth, name, startTime, endTime, candidates)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create election: %v", err)
+	}
+	return tx, nil
+}
+
+// StartElection starts the given election (owner only)
+func (bc *BlockchainClient) StartElection(electionID *big.Int) (*types.Transaction, error) {
+	tx, err := bc.contract.StartElection(bc.auth, electionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start election: %v", err)
+	}
+	return tx, nil
+}
+
+// EndElection ends the current active election (owner only)
+func (bc *BlockchainClient) EndElection() (*types.Transaction, error) {
+	tx, err := bc.contract.EndElection(bc.auth)
+	if err != nil {
+		return nil, fmt.Errorf("failed to end election: %v", err)
+	}
+	return tx, nil
+}
+
+// RegisterPollingUnit registers a polling unit on-chain (owner only)
+func (bc *BlockchainClient) RegisterPollingUnit(id, name, location string, totalVoters *big.Int) (*types.Transaction, error) {
+	tx, err := bc.contract.RegisterPollingUnit(bc.auth, id, name, location, totalVoters)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register polling unit: %v", err)
+	}
+	return tx, nil
+}
+
+// GetTotalElections returns total number of elections created
+func (bc *BlockchainClient) GetTotalElections() (*big.Int, error) {
+	total, err := bc.contract.GetTotalElections(bc.callOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total elections: %v", err)
+	}
+	return total, nil
+}
+
+// GetCandidateResults aggregates all candidates and their counts for an election by reading details then querying per-candidate
+func (bc *BlockchainClient) GetCandidateResults(electionID *big.Int) (map[string]*big.Int, error) {
+	details, err := bc.GetElectionDetails(electionID)
+	if err != nil {
+		return nil, err
+	}
+	results := make(map[string]*big.Int, len(details.Candidates))
+	for _, cid := range details.Candidates {
+		cnt, err := bc.GetElectionResults(electionID, cid)
+		if err != nil {
+			return nil, err
+		}
+		results[cid] = cnt
+	}
+	return results, nil
+}
+
+// RegisterCandidate registers a single candidate for an election (owner only)
+func (bc *BlockchainClient) RegisterCandidate(electionID *big.Int, candidateID string) (*types.Transaction, error) {
+	parsed, err := abi.JSON(strings.NewReader(SecureVotingSystemABI))
+	if err != nil {
+		return nil, fmt.Errorf("abi parse error: %v", err)
+	}
+	bound := bind.NewBoundContract(bc.contractAddress, parsed, bc.client, bc.client, bc.client)
+	tx, err := bound.Transact(bc.auth, "registerCandidate", electionID, candidateID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register candidate: %v", err)
+	}
+	return tx, nil
+}
+
+// RegisterCandidates registers multiple candidates (owner only)
+func (bc *BlockchainClient) RegisterCandidates(electionID *big.Int, candidateIDs []string) (*types.Transaction, error) {
+	parsed, err := abi.JSON(strings.NewReader(SecureVotingSystemABI))
+	if err != nil {
+		return nil, fmt.Errorf("abi parse error: %v", err)
+	}
+	bound := bind.NewBoundContract(bc.contractAddress, parsed, bc.client, bc.client, bc.client)
+	tx, err := bound.Transact(bc.auth, "registerCandidates", electionID, candidateIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register candidates: %v", err)
+	}
+	return tx, nil
+}
+
+// GetPollingUnit fetches polling unit details from chain
+func (bc *BlockchainClient) GetPollingUnit(id string) (*PollingUnitData, error) {
+	if bc.contract == nil {
+		return nil, fmt.Errorf("contract not initialized")
+	}
+	pu, err := bc.contract.PollingUnits(bc.callOpts, id)
+	if err != nil {
+		return nil, err
+	}
+	// The tuple order: id, name, location, totalVoters, votesRecorded, isActive
+	return &PollingUnitData{
+		ID:            pu.Id,
+		Name:          pu.Name,
+		Location:      pu.Location,
+		TotalVoters:   pu.TotalVoters,
+		VotesRecorded: pu.VotesRecorded,
+		IsActive:      pu.IsActive,
+	}, nil
 }

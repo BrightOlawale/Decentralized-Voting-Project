@@ -136,6 +136,23 @@ func (r *ElectionRepository) UpdateElectionStatus(electionID int64, isActive boo
 	return err
 }
 
+// DeleteElectionCascade deletes an election and related records
+func (r *ElectionRepository) DeleteElectionCascade(electionID int64) error {
+	// Delete votes for this election
+	if _, err := r.db.Exec(`DELETE FROM votes WHERE election_id = ?`, electionID); err != nil {
+		return err
+	}
+	// Delete candidates for this election
+	if _, err := r.db.Exec(`DELETE FROM candidates WHERE election_id = ?`, electionID); err != nil {
+		return err
+	}
+	// Finally delete the election itself
+	if _, err := r.db.Exec(`DELETE FROM elections WHERE id = ?`, electionID); err != nil {
+		return err
+	}
+	return nil
+}
+
 // GetElectionStatistics gets voting statistics for an election
 func (r *ElectionRepository) GetElectionStatistics(electionID int64) (map[string]interface{}, error) {
 	// Get total votes

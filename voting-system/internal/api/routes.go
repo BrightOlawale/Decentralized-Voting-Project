@@ -30,12 +30,13 @@ func SetupRoutes(router *gin.Engine, services interfaces.Services) {
 		setupWebSocketRoutes(v1, services)
 	}
 
-	// Web interface routes
-	setupWebRoutes(router, services)
-
-	// Static file serving
-	router.Static("/static", "./web/static")
-	router.LoadHTMLGlob("web/templates/*")
+	// Serve built admin webapp (Vite) from /webapp/admin
+	// keep assets
+	router.Static("/webapp/admin/assets", "./webapp/admin/dist/assets")
+	// serve index for root
+	router.GET("/webapp/admin", func(c *gin.Context) { c.File("webapp/admin/dist/index.html") })
+	// REMOVE this line (conflicts with assets):
+	// router.GET("/webapp/admin/*path", func(c *gin.Context) { c.File("webapp/admin/dist/index.html") })
 }
 
 // setupPublicRoutes configures routes that don't require authentication
@@ -47,9 +48,16 @@ func setupPublicRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 		public.GET("/election/current", handlers.GetCurrentElection(services))
 		public.GET("/election/:id", handlers.GetElectionDetails(services))
 		public.GET("/election/:id/results", handlers.GetElectionResults(services))
+		public.GET("/election/:id/candidates", handlers.GetElectionCandidates(services))
+
+		// Polling Unit
+		public.GET("/polling-unit/:id", handlers.GetPollingUnitInfo(services))
 
 		// Voter registration (public endpoint)
 		public.POST("/voter/register", handlers.RegisterVoter(services))
+
+		// Terminal token issuance (HMAC optional)
+		public.POST("/token/terminal", handlers.IssueTerminalToken(services))
 
 		// Authentication
 		// auth := public.Group("/auth")
@@ -62,73 +70,65 @@ func setupPublicRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 
 // setupAuthenticatedRoutes configures routes that require authentication
 func setupAuthenticatedRoutes(rg *gin.RouterGroup, services interfaces.Services) {
-	authenticated := rg.Group("/")
-	authenticated.Use(middlewares.AuthRequired(services))
+	// Voting endpoints (no auth)
+	voting := rg.Group("/voting")
 	{
-		// Voting endpoints
-		voting := authenticated.Group("/voting")
-		{
-			voting.POST("/cast", handlers.CastVote(services))
-			voting.GET("/status/:voter_hash", handlers.GetVoterStatus(services))
-			voting.POST("/verify", handlers.VerifyVoter(services))
-		}
+		voting.POST("/cast", handlers.CastVote(services))
+		voting.GET("/status/:voter_hash", handlers.GetVoterStatus(services))
+		voting.POST("/verify", handlers.VerifyVoter(services))
+	}
 
-		// Election endpoints
-		election := authenticated.Group("/election")
-		{
-			election.GET("/:id/statistics", handlers.GetElectionStatistics(services))
-			// election.GET("/:id/audit", handlers.GetElectionAudit(services))
-		}
+	// Election endpoints (no auth)
+	election := rg.Group("/election")
+	{
+		election.GET("/:id/statistics", handlers.GetElectionStatistics(services))
+		// election.GET("/:id/audit", handlers.GetElectionAudit(services))
+	}
 
-		// Terminal endpoints
-		terminal := authenticated.Group("/terminal")
-		{
-			terminal.POST("/register", handlers.RegisterTerminal(services))
-			terminal.GET("/:id/status", handlers.GetTerminalStatus(services))
-			// terminal.POST("/:id/heartbeat", handlers.TerminalHeartbeat(services))
-			// terminal.GET("/:id/config", handlers.GetTerminalConfig(services))
-		}
+	// Terminal endpoints (no auth)
+	terminal := rg.Group("/terminal")
+	{
+		terminal.POST("/register", handlers.RegisterTerminal(services))
+		terminal.GET("/:id/status", handlers.GetTerminalStatus(services))
+		terminal.POST("/polling-unit/ensure", handlers.EnsurePollingUnitTerminal(services))
+		// terminal.POST("/:id/heartbeat", handlers.TerminalHeartbeat(services))
+		// terminal.GET("/:id/config", handlers.GetTerminalConfig(services))
+	}
 
-		// // User profile
-		// user := authenticated.Group("/user")
-		// {
-		// 	user.GET("/profile", handlers.GetUserProfile(services))
-		// 	user.PUT("/profile", handlers.UpdateUserProfile(services))
-		// 	user.POST("/logout", handlers.Logout(services))
-		// }
-
-		// Audit endpoints
-		audit := authenticated.Group("/audit")
-		{
-			audit.GET("/logs", handlers.GetAuditLogs(services))
-			audit.GET("/votes/:time_range", handlers.GetVotesByTimeRange(services))
-		}
+	// Audit endpoints (no auth)
+	audit := rg.Group("/audit")
+	{
+		audit.GET("/logs", handlers.GetAuditLogs(services))
+		audit.GET("/votes/:time_range", handlers.GetVotesByTimeRange(services))
 	}
 }
 
 // setupAdminRoutes configures admin-only routes
 func setupAdminRoutes(rg *gin.RouterGroup, services interfaces.Services) {
-	admin := rg.Group("/admin")
-	admin.Use(middlewares.AuthRequired(services))
-	admin.Use(middlewares.AdminRequired(services))
+	// Admin routes (no auth)
 	{
 		// Dashboard
-		admin.GET("/dashboard", handlers.AdminDashboard(services))
-		// admin.GET("/stats", handlers.GetAdminStats(services))
+		rg.GET("/admin/dashboard", handlers.AdminDashboard(services))
+		// rg.GET("/admin/stats", handlers.GetAdminStats(services))
 
 		// Election management
-		elections := admin.Group("/elections")
+		elections := rg.Group("/admin/elections")
 		{
 			elections.POST("/", handlers.CreateElection(services))
 			// elections.PUT("/:id", handlers.UpdateElection(services))
 			elections.POST("/:id/start", handlers.StartElection(services))
 			elections.POST("/:id/end", handlers.EndElection(services))
+			// New: register candidates
+			elections.POST("/:id/candidates", handlers.RegisterCandidates(services))
+			// New: list and delete (DB only)
+			elections.GET("/", handlers.ListElections(services))
+			elections.DELETE("/", handlers.DeleteElection(services))
 			// elections.DELETE("/:id", handlers.DeleteElection(services))
 			// elections.GET("/", handlers.ListElections(services))
 		}
 
 		// Terminal management
-		terminals := admin.Group("/terminals")
+		terminals := rg.Group("/admin/terminals")
 		{
 			// terminals.GET("/", handlers.ListTerminals(services))
 			terminals.POST("/:id/authorize", handlers.AuthorizeTerminal(services))
@@ -138,7 +138,7 @@ func setupAdminRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 		}
 
 		// Vote management
-		votes := admin.Group("/votes")
+		votes := rg.Group("/admin/votes")
 		{
 			// votes.GET("/", handlers.ListVotes(services))
 			// votes.GET("/:id", handlers.GetVoteDetails(services))
@@ -147,9 +147,11 @@ func setupAdminRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 		}
 
 		// System management
-		system := admin.Group("/system")
+		system := rg.Group("/admin/system")
 		{
 			system.POST("/sync", handlers.TriggerSync(services))
+			// Register polling unit on-chain
+			system.POST("/polling-unit", handlers.RegisterPollingUnit(services))
 			// system.POST("/backup", handlers.CreateBackup(services))
 			// system.GET("/config", handlers.GetSystemConfig(services))
 			// system.PUT("/config", handlers.UpdateSystemConfig(services))
@@ -157,7 +159,7 @@ func setupAdminRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 		}
 
 		// Blockchain management
-		blockchain := admin.Group("/blockchain")
+		blockchain := rg.Group("/admin/blockchain")
 		{
 			// blockchain.GET("/status", handlers.GetBlockchainStatus(services))
 			// blockchain.GET("/transactions", handlers.ListTransactions(services))
@@ -166,7 +168,7 @@ func setupAdminRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 		}
 
 		// // User management
-		// users := admin.Group("/users")
+		// users := rg.Group("/admin/users")
 		// {
 		// 	users.GET("/", handlers.ListUsers(services))
 		// 	users.POST("/", handlers.CreateUser(services))
@@ -176,7 +178,7 @@ func setupAdminRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 		// }
 
 		// Audit and reporting
-		reports := admin.Group("/reports")
+		reports := rg.Group("/admin/reports")
 		{
 			reports.GET("/audit/full", handlers.GetFullAuditLogs(services))
 			// reports.GET("/election/:id/report", handlers.GetElectionReport(services))
@@ -195,29 +197,26 @@ func setupWebSocketRoutes(rg *gin.RouterGroup, services interfaces.Services) {
 		// ws.GET("/election/:id/results", handlers.ElectionResultsWebSocket(services))
 
 		// Authenticated WebSocket endpoints
-		authenticated := ws.Group("/")
-		authenticated.Use(middlewares.WSAuthRequired(services))
-		{
-			authenticated.GET("/votes", handlers.VoteUpdatesWebSocket(services))
-			// authenticated.GET("/terminal/:id", handlers.TerminalWebSocket(services))
-		}
+		ws.GET("/votes", handlers.VoteUpdatesWebSocket(services))
 
 		// Admin WebSocket endpoints
-		admin := ws.Group("/admin")
-		admin.Use(middlewares.WSAuthRequired(services))
+		// admin := ws.Group("/admin")
 		// admin.Use(middlewares.WSAdminRequired(services))
-		{
-			// admin.GET("/dashboard", handlers.AdminDashboardWebSocket(services))
-			// admin.GET("/system", handlers.SystemMonitoringWebSocket(services))
-			// admin.GET("/audit", handlers.AuditWebSocket(services))
-		}
+		// {
+		//     admin.GET("/dashboard", handlers.AdminDashboardWebSocket(services))
+		//     admin.GET("/system", handlers.SystemMonitoringWebSocket(services))
+		//     admin.GET("/audit", handlers.AuditWebSocket(services))
+		// }
 	}
 }
 
 // setupWebRoutes configures web interface routes
 func setupWebRoutes(router *gin.Engine, services interfaces.Services) {
+	// Keep login but allow all web pages without auth
+	router.GET("/web/login", handlers.WebLoginPage(services))
+	router.POST("/web/login", handlers.WebLoginSubmit(services))
+
 	web := router.Group("/web")
-	web.Use(middlewares.WebAuth(services))
 	{
 		web.GET("/", handlers.WebDashboard(services))
 		web.GET("/voting", handlers.WebVotingInterface(services))
