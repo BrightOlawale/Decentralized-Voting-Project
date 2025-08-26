@@ -1,0 +1,13 @@
+**Comprehensive Explanation: Decentralized Voting System**
+
+**System Architecture Overview**
+Your decentralized voting system is a sophisticated blockchain-based e-voting platform that combines Go backend services, Ethereum smart contracts, and biometric verification to create a secure, transparent, and tamper-proof voting system.
+**Core Components:**
+- Smart Contract Layer (Ethereum/Solidity)
+- Backend Services (Go)
+- Database Layer (PostgreSQL + SQLite)
+- API Layer (REST + WebSocket)
+- Terminal Interface (Voting stations)
+- Admin Dashboard (Election management)
+export PRIVATE_KEY=ec33abb4c6f9217cb4a57676eb294c2fef353ad4f9760c3881f53e5cfe0ba9ee
+export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/49144b2dd0cd4395b3624fee75200ca1
