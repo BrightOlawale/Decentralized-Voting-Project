@@ -9,5 +9,3 @@ Your decentralized voting system is a sophisticated blockchain-based e-voting pl
 - API Layer (REST + WebSocket)
 - Terminal Interface (Voting stations)
 - Admin Dashboard (Election management)
-export PRIVATE_KEY=ec33abb4c6f9217cb4a57676eb294c2fef353ad4f9760c3881f53e5cfe0ba9ee
-export SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/49144b2dd0cd4395b3624fee75200ca1
